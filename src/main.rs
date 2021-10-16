@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use mcfrs::compiler::{FileCompiler, MacroCompilerExt, ScopeBurnerExt, ScopesCompilerExt, SubstitutionsCompilerExt};
+use mcfrs::compiler::{CommentRemoverExt, FileCompiler, MacroCompilerExt, ScopeBurnerExt, ScopesCompilerExt, SubstitutionsCompilerExt};
 use vanilla::{datapack::Datapack, namespace::Namespace};
 
 mod mcfrs;
@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn Error>>{
         .macros()
         .scopes()
         .substitutions()
+        .comment_remove()
 
         .for_each(|scope| {
             println!("{}:\n{}\n", scope.get_reference_name(), &scope.content);
