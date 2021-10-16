@@ -1,0 +1,32 @@
+execute as @a run functio
+	say from $this function!
+	pass score@board into funcyion
+	Super secret #[hash]
+	Super secret1 #[hash]
+	Super secret2 #[hash.1]
+	execute if score run function
+		say HI
+	kill @a
+	teleport @a 0 0 0
+	function
+		say other runction
+give @a minecraft:diamond
+
+call check_for_block minecraft:dirt 
+call check_for_block minecraft:stone
+call check_for_block minecraft:grass_block
+call check_for_block minecraft:glass
+call check_for_block minecraft:dirt 
+call check_for_block minecraft:dirt 
+call check_for_block minecraft:dirt 
+
+generate function check_for_block $block
+	# $block
+	execute if block ~ ~ ~-1 $block run say exists!
+	execute if block ~ ~ ~1 $block run say exists!
+	execute if block ~-1 ~ ~ $block run say exists!
+	execute if block ~1 ~ ~ $block run say exists!
+	hello $this
+	function
+		ok this works!
+Am I visible?
