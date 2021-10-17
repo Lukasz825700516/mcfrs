@@ -1,3 +1,14 @@
+generate function check_for_block $block
+	# $block
+	execute if block ~ ~ ~-1 $block run say exists!
+	execute if block ~ ~ ~1 $block run say exists!
+	execute if block ~-1 ~ ~ $block run say exists!
+	execute if block ~1 ~ ~ $block run say exists!
+	hello $this
+	===>>>
+	call check_for_block_i
+	<<<===
+
 execute as @a run functio
 	say from $this function!
 	pass score@board into funcyion
@@ -16,17 +27,11 @@ call check_for_block minecraft:dirt
 call check_for_block minecraft:stone
 call check_for_block minecraft:grass_block
 call check_for_block minecraft:glass
-call check_for_block minecraft:dirt 
-call check_for_block minecraft:dirt 
-call check_for_block minecraft:dirt 
+execute run call check_for_block minecraft:dirt 
+execute run call check_for_block minecraft:dirt 
+execute run call check_for_block minecraft:dirt 
 
-generate function check_for_block $block
-	# $block
-	execute if block ~ ~ ~-1 $block run say exists!
-	execute if block ~ ~ ~1 $block run say exists!
-	execute if block ~-1 ~ ~ $block run say exists!
-	execute if block ~1 ~ ~ $block run say exists!
-	hello $this
-	function
-		ok this works!
 Am I visible?
+
+generate function check_for_block_i
+	ok this works!

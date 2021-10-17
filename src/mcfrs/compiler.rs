@@ -244,6 +244,34 @@ where I: Iterator<Item = Scope<'a>> {
     }
 }
 
+pub struct MacroDefinition<'a> {
+    parameters: Vec<String>,
+    namespace: &'a Namespace<'a>,
+    name: String,
+    content: String,
+}
+
+impl<'b> MacroDefinition<'b> {
+    fn new<'a>(namespace: &'b Namespace<'b>, line: &'a str, mut words: std::str::Split<'a, &'a str>, lines: &mut std::iter::Peekable<std::str::Lines>) -> Self {
+        let current_indent = get_indent(line);
+        let macro_name = words.next().unwrap().to_string();
+        let parameters: Vec<String> = words.map(|param| param.to_string()).collect();
+        let content: String = lines
+            .by_ref()
+            .peeking_take_while(|l| get_indent(l) > current_indent)
+            .map(|line| &line[current_indent..])
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        Self {
+            name: macro_name,
+            parameters,
+            content,
+            namespace,
+        }
+    }
+}
+
 pub struct MacroCall {
     scope_id: usize,
     parameters: Vec<String>,
@@ -251,6 +279,20 @@ pub struct MacroCall {
 
 impl MacroCall {
     pub fn new(scope_id: usize, parameters: Vec<String>) -> Self { Self { scope_id, parameters } }
+    pub fn get_content(&self, definition: &MacroDefinition) -> String {
+        let mut replaced_content = definition.content.clone();
+
+        // Zip into key value pairs names and values of
+        // parameters, then replace all keys to values in macro
+        // content
+        definition.parameters.iter()
+            .zip(self.parameters.iter())
+            .for_each(|(key, value)| {
+                replaced_content = replaced_content.replace(key, value);
+            });
+
+        replaced_content
+    }
 }
 
 pub struct MacroCompiler<'a, I>
@@ -258,6 +300,7 @@ where I: Iterator<Item = Scope<'a>> {
     source: I,
     buffered: Vec<Scope<'a>>,
 
+    definitions: Vec<MacroDefinition<'a>>,
     calls: HashMap<String, Vec<MacroCall>>,
     next_scope_id: Rev<Range<usize>>,
 }
@@ -265,6 +308,7 @@ where I: Iterator<Item = Scope<'a>> {
 pub trait MacroCompilerExt<'a, I>: Sized + Iterator<Item = Scope<'a>>
 where I: Iterator<Item = Scope<'a>> {
     // Compiles generate function stuff
+    // If definition preceeds call, call will paste definition content, not call generated function
     fn macros(self) -> MacroCompiler<'a, I>;
 }
 
@@ -282,6 +326,7 @@ where I: Iterator<Item = Scope<'a>> {
             source,
             buffered: Vec::new(),
             calls: HashMap::new(),
+            definitions: Vec::new(),
             next_scope_id: (0 as usize..usize::MAX).rev()
         }
     }
@@ -302,6 +347,7 @@ where I: Iterator<Item = Scope<'a>> {
 
         match scope {
             Some(mut scope) => {
+                let mut scope_needs_reprocessing = false;
                 let mut lines = scope.content
                     .lines()
                     .peekable();
@@ -317,31 +363,18 @@ where I: Iterator<Item = Scope<'a>> {
                             match words.next() { 
                                 None => {},
                                 Some("generate") => if words.next() == Some("function") {
-                                    let (macro_name, parameters, content) = get_macro_definition(line, words, &mut lines);
+                                    let definition = MacroDefinition::new(scope.namespace, line, words, &mut lines);
 
                                     // This long multiline spaggetti finds and converts macro calls
                                     // by the given name, and for each of them generates new scope,
                                     // that is then put into the buffer for later use.
                                     self.calls.iter()
                                         .filter_map(|(name, calls)| {
-                                            if name == macro_name { Some(calls.into_iter()) }
+                                            if *name == definition.name { Some(calls.into_iter()) }
                                             else { None }
                                         })
                                         .flatten()
-                                        .map(|call| {
-                                            let mut replaced_content = content.clone();
-
-                                            // Zip into key value pairs names and values of
-                                            // parameters, then replace all keys to values in macro
-                                            // content
-                                            parameters.iter()
-                                                .zip(call.parameters.iter())
-                                                .for_each(|(key, value)| {
-                                                    replaced_content = replaced_content.replace(key, value);
-                                                });
-
-                                            (call.scope_id, replaced_content)
-                                        })
+                                        .map(|call| (call.scope_id, call.get_content(&definition)))
                                         .collect::<Vec<_>>()
                                         .into_iter()
                                         .for_each(|(id, content)| {
@@ -349,6 +382,8 @@ where I: Iterator<Item = Scope<'a>> {
                                             scope.content = content;
                                             self.buffered.push(scope);
                                         });
+
+                                    self.definitions.push(definition);
                                 },
                                 Some(_) => {
                                     let mut words = line.split(" ").peekable();
@@ -359,6 +394,8 @@ where I: Iterator<Item = Scope<'a>> {
                                         .join(" ");
 
                                     if words.next() == Some("call") {
+                                        scope_needs_reprocessing = true;
+
                                         let macro_name = words.next().unwrap().to_string();
                                         let parameters = words.map(|p| p.to_string())
                                             .collect::<Vec<_>>();
@@ -368,33 +405,48 @@ where I: Iterator<Item = Scope<'a>> {
                                             .flatten()
                                             .find(|call| call.parameters == parameters);
 
-                                        match previous_same_call {
-                                            Some(call) => {
-                                                let function_call = match replaced_line.len() > 0 {
-                                                    true => format!(" function {}", Scope::new_unnamed(call.scope_id, scope.namespace).get_reference_name()),
-                                                    false => format!("function {}", Scope::new_unnamed(call.scope_id, scope.namespace).get_reference_name())
-                                                };
 
-                                                replaced_line += function_call.as_str();
-                                            },
-                                            None => {
-                                                let new_scope = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
-                                                let function_call = match replaced_line.len() > 0 {
-                                                    true => format!(" function {}", Scope::new_unnamed(new_scope.scope_id, scope.namespace).get_reference_name()),
-                                                    false => format!("function {}", Scope::new_unnamed(new_scope.scope_id, scope.namespace).get_reference_name()),
-                                                };
+                                        match self.definitions.iter()
+                                            .find(|def| def.name == macro_name && replaced_line.len() == 0) {
+                                            Some(macro_definition) => {
+                                                let call = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
+                                                let replaced_content = call.get_content(macro_definition);
+                                                replaced_line = replaced_content;
 
-                                                replaced_line += function_call.as_str();
                                                 if !self.calls.contains_key(&macro_name) {
-                                                    self.calls.insert(macro_name, vec![new_scope]);
+                                                    self.calls.insert(macro_name.clone(), vec![call]);
                                                 } else {
                                                     self.calls.get_mut(&macro_name)
                                                         .unwrap()
-                                                        .push(new_scope);
+                                                        .push(call);
                                                 }
+                                            },
+                                            None => {
+                                                match previous_same_call {
+                                                    Some(call) => {
+                                                        let function_call = get_call_call(&replaced_line, call.scope_id, scope.namespace);
 
+                                                        replaced_line += function_call.as_str();
+                                                    },
+                                                    None => {
+                                                        let new_scope = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
+                                                        let function_call = get_call_call(&replaced_line, new_scope.scope_id, scope.namespace);
+
+                                                        replaced_line += function_call.as_str();
+                                                        if !self.calls.contains_key(&macro_name) {
+                                                            self.calls.insert(macro_name.clone(), vec![new_scope]);
+                                                        } else {
+                                                            self.calls.get_mut(&macro_name)
+                                                                .unwrap()
+                                                                .push(new_scope);
+                                                        }
+
+                                                    }
+                                                }
                                             }
-                                        }
+                                            
+
+                                        } 
 
                                     } 
                                     new_lines.push(replaced_line);
@@ -412,25 +464,44 @@ where I: Iterator<Item = Scope<'a>> {
 
                 scope.content = new_content;
 
-                Some(scope)
+                match scope_needs_reprocessing {
+                    true => { self.buffered.push(scope); self.next() }
+                    false => Some(scope)
+                }
             },
-            None => None
+            None => {
+                while let Some(definition) = self.definitions.pop() {
+                    self.calls.iter()
+                        .filter_map(|(name, calls)| {
+                            if *name == definition.name { Some(calls.into_iter()) }
+                            else { None }
+                        })
+                        .flatten()
+                        .map(|call| (call.scope_id, call.get_content(&definition), definition.namespace))
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .for_each(|(id, content, namespace)| {
+                            let mut scope = Scope::new_unnamed(id, namespace);
+                            scope.content = content;
+                            self.buffered.push(scope);
+                        });
+                }
+
+                if self.buffered.len() > 0 { self.next() }
+                else { None }
+            }
         }
     }
 }
 
-fn get_macro_definition<'a>(line: &'a str, mut words: std::str::Split<'a, &'a str>, lines: &mut std::iter::Peekable<std::str::Lines>) -> (&'a str, Vec<&'a str>, String) {
-    let current_indent = get_indent(line);
-    let macro_name = words.next().unwrap();
-    let parameters: Vec<&str> = words.collect();
-    let content: String = lines
-        .by_ref()
-        .peeking_take_while(|l| get_indent(l) > current_indent)
-        .map(|line| &line[current_indent..])
-        .collect::<Vec<_>>()
-        .join("\n");
-    (macro_name, parameters, content)
+fn get_call_call(replaced_line: &String, scope_id: usize, namespace: &Namespace) -> String {
+    let function_call = match replaced_line.len() > 0 {
+        true => format!(" function {}", Scope::new_unnamed(scope_id, namespace).get_reference_name()),
+        false => format!("function {}", Scope::new_unnamed(scope_id, namespace).get_reference_name()),
+    };
+    function_call
 }
+
 
 
 pub struct CommentRemover<'a, I>
@@ -446,7 +517,7 @@ where I: Iterator<Item = Scope<'a>>
 
 pub trait CommentRemoverExt<'a, I>: Sized + Iterator<Item = Scope<'a>>
 where I: Iterator<Item = Scope<'a>> {
-    // Compiles generate function stuff
+    // Removes lines that begin with "#"
     fn comment_remove(self) -> CommentRemover<'a, I>;
 }
 
