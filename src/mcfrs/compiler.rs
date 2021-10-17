@@ -330,6 +330,31 @@ where I: Iterator<Item = Scope<'a>> {
             next_scope_id: (0 as usize..usize::MAX).rev()
         }
     }
+    fn save_macro(&mut self, name: String, call: MacroCall) {
+        if !self.calls.contains_key(&name) {
+            self.calls.insert(name.clone(), vec![call]);
+        } else {
+            self.calls.get_mut(&name)
+                .unwrap()
+                .push(call);
+        }
+    }
+    fn generate_scopes(&mut self, definition: &MacroDefinition<'a>) {
+        self.calls.iter()
+            .filter_map(|(name, calls)| {
+                if *name == definition.name { Some(calls.into_iter()) }
+                else { None }
+            })
+            .flatten()
+            .map(|call| (call.scope_id, call.get_content(&definition), definition.namespace))
+            .collect::<Vec<_>>()
+            .into_iter()
+            .for_each(|(id, content, namespace)| {
+                let mut scope = Scope::new_unnamed(id, namespace);
+                scope.content = content;
+                self.buffered.push(scope);
+            });
+    }
 }
 
 
@@ -364,25 +389,7 @@ where I: Iterator<Item = Scope<'a>> {
                                 None => {},
                                 Some("generate") => if words.next() == Some("function") {
                                     let definition = MacroDefinition::new(scope.namespace, line, words, &mut lines);
-
-                                    // This long multiline spaggetti finds and converts macro calls
-                                    // by the given name, and for each of them generates new scope,
-                                    // that is then put into the buffer for later use.
-                                    self.calls.iter()
-                                        .filter_map(|(name, calls)| {
-                                            if *name == definition.name { Some(calls.into_iter()) }
-                                            else { None }
-                                        })
-                                        .flatten()
-                                        .map(|call| (call.scope_id, call.get_content(&definition)))
-                                        .collect::<Vec<_>>()
-                                        .into_iter()
-                                        .for_each(|(id, content)| {
-                                            let mut scope = Scope::new_unnamed(id, scope.namespace);
-                                            scope.content = content;
-                                            self.buffered.push(scope);
-                                        });
-
+                                    self.generate_scopes(&definition);
                                     self.definitions.push(definition);
                                 },
                                 Some(_) => {
@@ -413,13 +420,7 @@ where I: Iterator<Item = Scope<'a>> {
                                                 let replaced_content = call.get_content(macro_definition);
                                                 replaced_line = replaced_content;
 
-                                                if !self.calls.contains_key(&macro_name) {
-                                                    self.calls.insert(macro_name.clone(), vec![call]);
-                                                } else {
-                                                    self.calls.get_mut(&macro_name)
-                                                        .unwrap()
-                                                        .push(call);
-                                                }
+                                                self.save_macro(macro_name, call);
                                             },
                                             None => {
                                                 match previous_same_call {
@@ -433,13 +434,7 @@ where I: Iterator<Item = Scope<'a>> {
                                                         let function_call = get_call_call(&replaced_line, new_scope.scope_id, scope.namespace);
 
                                                         replaced_line += function_call.as_str();
-                                                        if !self.calls.contains_key(&macro_name) {
-                                                            self.calls.insert(macro_name.clone(), vec![new_scope]);
-                                                        } else {
-                                                            self.calls.get_mut(&macro_name)
-                                                                .unwrap()
-                                                                .push(new_scope);
-                                                        }
+                                                        self.save_macro(macro_name, new_scope);
 
                                                     }
                                                 }
@@ -471,20 +466,7 @@ where I: Iterator<Item = Scope<'a>> {
             },
             None => {
                 while let Some(definition) = self.definitions.pop() {
-                    self.calls.iter()
-                        .filter_map(|(name, calls)| {
-                            if *name == definition.name { Some(calls.into_iter()) }
-                            else { None }
-                        })
-                        .flatten()
-                        .map(|call| (call.scope_id, call.get_content(&definition), definition.namespace))
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                        .for_each(|(id, content, namespace)| {
-                            let mut scope = Scope::new_unnamed(id, namespace);
-                            scope.content = content;
-                            self.buffered.push(scope);
-                        });
+                    self.generate_scopes(&definition);
                 }
 
                 if self.buffered.len() > 0 { self.next() }
@@ -492,6 +474,8 @@ where I: Iterator<Item = Scope<'a>> {
             }
         }
     }
+
+
 }
 
 fn get_call_call(replaced_line: &String, scope_id: usize, namespace: &Namespace) -> String {
