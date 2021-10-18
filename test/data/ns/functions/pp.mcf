@@ -18,8 +18,10 @@ generate function vec3_operation_vec3 $score $operation $vec3
 	scoreboard players operation y$score $operation y$vec3
 	scoreboard players operation z$score $operation z$vec3
 
-execute as @e[type=minecraft:marker,tag=rabbit_trap] at @s run function
-	execute as @e[type=minecraft:rabbit,distance=.5..5,nbt={OnGround:1b}] at @s run function
+execute as @e[type=minecraft:marker,tag=rabbit_trap]
+back at @s run function
+	execute as @e[type=minecraft:rabbit,distance=.5..5,nbt={OnGround:1b}]
+	back at @s run function
 		execute facing @e[type=minecraft:marker,distance=..5,tag=rabbit_trap,sort=nearest,limit=1] run summon minecraft:marker ^ ^ ^1 {Tags:["tmp"]}
 
 		execute as @e[type=minecraft:marker,distance=..1,tag=tmp,limit=1] run function
