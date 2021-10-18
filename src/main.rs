@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use mcfrs::compiler::{CommentRemoverExt, FileCompiler, MacroCompilerExt, ScopesCompilerExt, SubstitutionsCompilerExt};
+use mcfrs::compiler::{comment_remover::CommentRemoverExt, file_compiler::FileCompiler, macro_compiler::MacroCompilerExt, scopes_compiler::ScopesCompilerExt, substitutions_compiler::SubstitutionsCompilerExt};
 use vanilla::{datapack::Datapack, namespace::Namespace};
 
 mod mcfrs;
