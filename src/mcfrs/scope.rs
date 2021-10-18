@@ -25,6 +25,15 @@ impl<'a> Scope<'a> {
         Self { name, namespace, parent: None, content: String::new() }
     }
 
+    pub fn set_reference_id(&mut self, id: usize) {
+        self.name = format!("_/{:02X}/{:02X}/{:02X}/{:02X}",
+            (id / ( 1 << 24)) & 255,
+            (id / ( 1 << 16)) & 255,
+            (id / ( 1 << 8)) & 255,
+            (id / ( 1 << 0)) & 255,
+        );
+    }
+
     pub fn new(name: String, namespace: &'a Namespace<'a>) -> Self {
         Self { name, namespace, parent: None, content: String::new() }
     }

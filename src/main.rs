@@ -11,10 +11,10 @@ fn main() -> Result<(), Box<dyn Error>>{
     let namespace = Namespace::try_new(&datapack, String::from("ns"))?;
 
     FileCompiler::new(&namespace)
+        .comment_remove()
         .macros()
         .scopes()
         .substitutions()
-        .comment_remove()
 
         .for_each(|scope| {
             println!("{}:\n{}\n", scope.get_reference_name(), &scope.content);

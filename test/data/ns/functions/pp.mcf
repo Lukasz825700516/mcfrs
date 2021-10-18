@@ -1,37 +1,32 @@
-generate function check_for_block $block
-	# $block
-	execute if block ~ ~ ~-1 $block run say exists!
-	execute if block ~ ~ ~1 $block run say exists!
-	execute if block ~-1 ~ ~ $block run say exists!
-	execute if block ~1 ~ ~ $block run say exists!
-	hello $this
-	===>>>
-	call check_for_block_i
-	<<<===
+generate function nbt3_to_vec3 $score $vec3 $precision
+	execute store result score x$score run data get entity @s $vec3[0] 
+	execute store result score y$score run data get entity @s $vec3[1] 
+	execute store result score z$score run data get entity @s $vec3[2] 
 
-execute as @a run functio
-	say from $this function!
-	pass score@board into funcyion
-	Super secret #[hash]
-	Super secret1 #[hash]
-	Super secret2 #[hash.1]
-	execute if score run function
-		say HI
-	kill @a
-	teleport @a 0 0 0
-	function
-		say other runction
-give @a minecraft:diamond
+generate function vec3_operation_vec3_to_nbt3 $destination_vec3 $operation $vec3 $nbt3 $type $precision
+	execute store result entity @s $nbt3[0] $type $precision run scoreboard players operation x$destination_vec3 $operation x$vec3
+	execute store result entity @s $nbt3[1] $type $precision run scoreboard players operation y$destination_vec3 $operation y$vec3
+	execute store result entity @s $nbt3[2] $type $precision run scoreboard players operation z$destination_vec3 $operation z$vec3
 
-call check_for_block minecraft:dirt 
-call check_for_block minecraft:stone
-call check_for_block minecraft:grass_block
-call check_for_block minecraft:glass
-execute run call check_for_block minecraft:dirt 
-execute run call check_for_block minecraft:dirt 
-execute run call check_for_block minecraft:dirt 
+generate function vec3_operation $score $operation $score
+	scoreboard players operation x$score $operation $score
+	scoreboard players operation y$score $operation $score
+	scoreboard players operation z$score $operation $score
 
-Am I visible?
+generate function vec3_operation_vec3 $score $operation $vec3
+	scoreboard players operation x$score $operation x$vec3
+	scoreboard players operation y$score $operation y$vec3
+	scoreboard players operation z$score $operation z$vec3
 
-generate function check_for_block_i
-	ok this works!
+execute as @e[type=minecraft:marker,tag=rabbit_trap] at @s run function
+	execute as @e[type=minecraft:rabbit,distance=.5..5,nbt={OnGround:1b}] at @s run function
+		execute facing @e[type=minecraft:marker,distance=..5,tag=rabbit_trap,sort=nearest,limit=1] run summon minecraft:marker ^ ^ ^1 {Tags:["tmp"]}
+
+		execute as @e[type=minecraft:marker,distance=..1,tag=tmp,limit=1] run function
+			execute run call nbt3_to_vec3 a@tmp Pos 128
+			kill @s
+
+		call nbt3_to_vec3 b@tmp Pos -128
+		execute run call vec3_operation_vec3 b@tmp += a@tmp
+		execute run call nbt3_to_vec3 a@tmp Motion 128
+		execute run call vec3_operation_vec3_to_nbt3 a@tmp += b@tmp Motion double 0.007812

@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, VecDeque}, fs::File, io::{Read, Write}, iter::Rev, ops::{Range, RangeFrom}, path::PathBuf};
+use std::{collections::{HashMap, VecDeque}, fs::File, io::{Read, Write}, iter::{Peekable, Rev}, ops::{Range, RangeFrom}, path::PathBuf};
 
 use itertools::Itertools;
 use regex::Regex;
@@ -88,6 +88,7 @@ where I: Iterator<Item = Scope<'a>>{
 
     buffered_out: VecDeque<Scope<'a>>,
     next_anonymous_scope_name: RangeFrom<usize>,
+    compiled_scopes: HashMap<String, String>,
 }
 
 impl<'a, I> Iterator for ScopesCompiler<'a, I>
@@ -109,13 +110,24 @@ where I: Iterator<Item = Scope<'a>> {
                         let indent = get_indent(line);
 
                         if stack.len() < indent {
-                            let new_scope = Scope::new_unnamed(self.next_anonymous_scope_name.next().unwrap(), scope.namespace);
-                            stack.last_mut().unwrap().content += " ";
-                            stack.last_mut().unwrap().content += new_scope.get_reference_name().as_str();
+                            let new_scope = Scope::new_unnamed(0, scope.namespace);
                             stack.push(new_scope);
                         } 
                         while stack.len() > indent {
-                            self.buffered_out.push_back(stack.pop().unwrap())
+                            let mut new_scope = stack.pop().unwrap();
+                            match self.compiled_scopes.get(&new_scope.content) {
+                                Some(reference_name) => {
+                                    stack.last_mut().unwrap().content += " ";
+                                    stack.last_mut().unwrap().content += reference_name.as_str();
+                                },
+                                None => {
+                                    new_scope.set_reference_id(self.next_anonymous_scope_name.next().unwrap());
+                                    stack.last_mut().unwrap().content += " ";
+                                    stack.last_mut().unwrap().content += new_scope.get_reference_name().as_str();
+                                    self.compiled_scopes.insert(new_scope.content.clone(), new_scope.get_reference_name());
+                                    self.buffered_out.push_back(new_scope);
+                                }
+                            }
                         }
 
                         stack.last_mut().unwrap().content += "\n";
@@ -123,7 +135,18 @@ where I: Iterator<Item = Scope<'a>> {
                     }
 
                     while stack.len() > 0 {
-                        self.buffered_out.push_back(stack.pop().unwrap());
+                        let mut new_scope = stack.pop().unwrap();
+                        match self.compiled_scopes.get(&new_scope.content) {
+                            Some(_) => {
+                            },
+                            None => {
+                                if stack.len() > 0 {
+                                    new_scope.set_reference_id(self.next_anonymous_scope_name.next().unwrap());
+                                }
+                                self.compiled_scopes.insert(new_scope.content.clone(), new_scope.get_reference_name());
+                                self.buffered_out.push_back(new_scope);
+                            }
+                        }
                     }
 
                     self.next()
@@ -150,7 +173,8 @@ where I: Iterator<Item = Scope<'a>> {
         Self {
             source,
             buffered_out: VecDeque::new(),
-            next_anonymous_scope_name: (0 as usize)..
+            next_anonymous_scope_name: (0 as usize)..,
+            compiled_scopes: HashMap::new(),
         }
     }
 }
@@ -252,7 +276,7 @@ pub struct MacroDefinition<'a> {
 }
 
 impl<'b> MacroDefinition<'b> {
-    fn new<'a>(namespace: &'b Namespace<'b>, line: &'a str, mut words: std::str::Split<'a, &'a str>, lines: &mut std::iter::Peekable<std::str::Lines>) -> Self {
+    fn new<'a>(namespace: &'b Namespace<'b>, line: &'a str, mut words: Peekable<std::str::Split<'a, &'a str>>, lines: &mut std::iter::Peekable<std::str::Lines>) -> Self {
         let current_indent = get_indent(line);
         let macro_name = words.next().unwrap().to_string();
         let parameters: Vec<String> = words.map(|param| param.to_string()).collect();
@@ -383,68 +407,66 @@ where I: Iterator<Item = Scope<'a>> {
                     match lines.next() {
                         Some(line) => {
                             // let line = line.trim();
-                            let mut words = line.split(" ");
+                            let mut words = line.split(" ").peekable();
 
-                            match words.next() { 
+                            match words.peek() { 
                                 None => {},
-                                Some("generate") => if words.next() == Some("function") {
+                                Some(&"generate") => { words.next(); if words.next() == Some("function") {
                                     let definition = MacroDefinition::new(scope.namespace, line, words, &mut lines);
                                     self.generate_scopes(&definition);
                                     self.definitions.push(definition);
-                                },
+                                }},
                                 Some(_) => {
-                                    let mut words = line.split(" ").peekable();
-                                    let mut replaced_line = words
-                                        .by_ref()
-                                        .peeking_take_while(|&word| word.trim() != "call")
-                                        .collect::<Vec<_>>()
-                                        .join(" ");
 
-                                    if words.next() == Some("call") {
+                                    if let Some((prefix, payload)) = line.split_once("call") {
                                         scope_needs_reprocessing = true;
 
+                                        let mut words = payload.trim().split(" ");
                                         let macro_name = words.next().unwrap().to_string();
                                         let parameters = words.map(|p| p.to_string())
                                             .collect::<Vec<_>>();
+
 
                                         let previous_same_call = self.calls.iter()
                                             .filter_map(|(name, calls)| if name.as_str() == macro_name { Some(calls) } else { None })
                                             .flatten()
                                             .find(|call| call.parameters == parameters);
 
-
-                                        match self.definitions.iter()
-                                            .find(|def| def.name == macro_name && replaced_line.len() == 0) {
+                                        let new_line = match self.definitions.iter()
+                                            .find(|def| def.name == macro_name && prefix.trim().len() == 0) {
                                             Some(macro_definition) => {
                                                 let call = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
-                                                let replaced_content = call.get_content(macro_definition);
-                                                replaced_line = replaced_content;
+                                                let new_line = call.get_content(macro_definition)
+                                                    .lines()
+                                                    .map(|line| format!("{}{}", prefix, line))
+                                                    .join("\n");
 
-                                                self.save_macro(macro_name, call);
+                                                if previous_same_call.is_none() {
+                                                    self.save_macro(macro_name, call);
+                                                }
+
+                                                new_line
                                             },
-                                            None => {
-                                                match previous_same_call {
-                                                    Some(call) => {
-                                                        let function_call = get_call_call(&replaced_line, call.scope_id, scope.namespace);
+                                            None => match previous_same_call {
+                                                Some(call) => {
+                                                    let function_call = get_call_call(call.scope_id, scope.namespace);
+                                                    format!("{}{}", prefix, function_call)
+                                                },
+                                                None => {
+                                                    let new_scope = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
+                                                    let function_call = get_call_call(new_scope.scope_id, scope.namespace);
 
-                                                        replaced_line += function_call.as_str();
-                                                    },
-                                                    None => {
-                                                        let new_scope = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
-                                                        let function_call = get_call_call(&replaced_line, new_scope.scope_id, scope.namespace);
+                                                    self.save_macro(macro_name, new_scope);
 
-                                                        replaced_line += function_call.as_str();
-                                                        self.save_macro(macro_name, new_scope);
-
-                                                    }
+                                                    format!("{}{}", prefix, function_call)
                                                 }
                                             }
-                                            
+                                        };
 
-                                        } 
-
-                                    } 
-                                    new_lines.push(replaced_line);
+                                        new_lines.push(new_line);
+                                    } else {
+                                        new_lines.push(line.to_string());
+                                    }
 
                                 }
                             }
@@ -478,12 +500,8 @@ where I: Iterator<Item = Scope<'a>> {
 
 }
 
-fn get_call_call(replaced_line: &String, scope_id: usize, namespace: &Namespace) -> String {
-    let function_call = match replaced_line.len() > 0 {
-        true => format!(" function {}", Scope::new_unnamed(scope_id, namespace).get_reference_name()),
-        false => format!("function {}", Scope::new_unnamed(scope_id, namespace).get_reference_name()),
-    };
-    function_call
+fn get_call_call(scope_id: usize, namespace: &Namespace) -> String {
+    format!("function {}", Scope::new_unnamed(scope_id, namespace).get_reference_name())
 }
 
 
