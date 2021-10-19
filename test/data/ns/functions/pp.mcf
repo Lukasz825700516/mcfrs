@@ -1,34 +1,87 @@
-generate function nbt3_to_vec3 $score $vec3 $precision
-	execute store result score x$score run data get entity @s $vec3[0] 
-	execute store result score y$score run data get entity @s $vec3[1] 
-	execute store result score z$score run data get entity @s $vec3[2] 
+generate function add_color_to_text $color $text
+	data modify storage tmp:a . set from block ~ ~ ~ Text$text
+	data modify block ~ ~ ~ Text$text set value '[{"text":"","color":"$color"},{"nbt":"storage","storage":"tmp:a"}]'
 
-generate function vec3_operation_vec3_to_nbt3 $destination_vec3 $operation $vec3 $nbt3 $type $precision
-	execute store result entity @s $nbt3[0] $type $precision run scoreboard players operation x$destination_vec3 $operation x$vec3
-	execute store result entity @s $nbt3[1] $type $precision run scoreboard players operation y$destination_vec3 $operation y$vec3
-	execute store result entity @s $nbt3[2] $type $precision run scoreboard players operation z$destination_vec3 $operation z$vec3
+generate function outline_sign $type $block_state $rotation
+	execute
+	back if block ~ ~ ~ $type[$block_state]
+	back rotated $rotation 0
+	back run call particle_sign_frame
 
-generate function vec3_operation $score $operation $score
-	scoreboard players operation x$score $operation $score
-	scoreboard players operation y$score $operation $score
-	scoreboard players operation z$score $operation $score
+generate function copy_sign_color $color
+	execute
+	back if block #minecraft:signs{Color:"$color"}
+	back run function
+		call add_color_to_text $color 1
+		call add_color_to_text $color 2
+		call add_color_to_text $color 3
+		call add_color_to_text $color 4
+execute
+back as @a
+back at @s 
+back if entity @s[nbt={SelectedItem:{id:"minecraft:feather"}}] run function
+	scoreboard players set a@tmp 50
+	execute anchored eyes run function
+		execute
+		back if block ~ ~ ~ #minecraft:signs 
+		back align xyz
+		back positioned ~.5 ~.5 ~.5
+		back run function
+			scoreboard players set a@tmp 0
 
-generate function vec3_operation_vec3 $score $operation $vec3
-	scoreboard players operation x$score $operation x$vec3
-	scoreboard players operation y$score $operation y$vec3
-	scoreboard players operation z$score $operation z$vec3
+			execute
+			back if block ~ ~ ~ #minecraft:standing_signs
+			back run function
+				call outline_sign #minecraft:standing_signs rotation=0 0 
+				call outline_sign #minecraft:standing_signs rotation=1 22.5
+				call outline_sign #minecraft:standing_signs rotation=2 45
+				call outline_sign #minecraft:standing_signs rotation=3 67.5
+				call outline_sign #minecraft:standing_signs rotation=4 90
+				call outline_sign #minecraft:standing_signs rotation=5 112.5
+				call outline_sign #minecraft:standing_signs rotation=6 135
+				call outline_sign #minecraft:standing_signs rotation=7 157.5
+				call outline_sign #minecraft:standing_signs rotation=8 180
+				call outline_sign #minecraft:standing_signs rotation=9 202.5
+				call outline_sign #minecraft:standing_signs rotation=10 225
+				call outline_sign #minecraft:standing_signs rotation=11 247.5
+				call outline_sign #minecraft:standing_signs rotation=12 270
+				call outline_sign #minecraft:standing_signs rotation=13 292.5
+				call outline_sign #minecraft:standing_signs rotation=14 315
+				call outline_sign #minecraft:standing_signs rotation=15 337.5
 
-execute as @e[type=minecraft:marker,tag=rabbit_trap]
-back at @s run function
-	execute as @e[type=minecraft:rabbit,distance=.5..5,nbt={OnGround:1b}]
-	back at @s run function
-		execute facing @e[type=minecraft:marker,distance=..5,tag=rabbit_trap,sort=nearest,limit=1] run summon minecraft:marker ^ ^ ^1 {Tags:["tmp"]}
+			execute
+			back if block ~ ~ ~ #minecraft:wall_signs
+			back run function
+				call outline_sign #minecraft:wall_signs facing=north 0
+				call outline_sign #minecraft:wall_signs facing=south 180
+				call outline_sign #minecraft:wall_signs facing=east 90
+				call outline_sign #minecraft:wall_signs facing=west 270
 
-		execute as @e[type=minecraft:marker,distance=..1,tag=tmp,limit=1] run function
-			execute run call nbt3_to_vec3 a@tmp Pos 128
-			kill @s
 
-		call nbt3_to_vec3 b@tmp Pos -128
-		execute run call vec3_operation_vec3 b@tmp += a@tmp
-		execute run call nbt3_to_vec3 a@tmp Motion 128
-		execute run call vec3_operation_vec3_to_nbt3 a@tmp += b@tmp Motion double 0.007812
+			execute
+			back if score @s@#[$namespace.sneak.rising_edge] matches 1
+			back run function
+				call copy_sign_color white
+				call copy_sign_color black
+				call copy_sign_color red
+				call copy_sign_color blue
+				call copy_sign_color green
+				item modify @s weapon.mainhand $namespace:storage_to_lore
+			
+
+		scoreboard players remove a@tmp 1
+		execute if score a@tmp matches 1..
+		back if block ~ ~ ~ minecraft:air 
+		back positioned ^ ^ ^.1
+		back run function $this
+
+generate function particle_sign_frame
+	particle minecraft:crit ^-.5 ^-.5 ^.5
+	particle minecraft:crit ^-.5 ^.5 ^.5
+
+	particle minecraft:crit ^ ^.5 ^.5
+	particle minecraft:crit ^ ^-.5 ^.5
+
+	particle minecraft:crit ^.5 ^-.5 ^.5
+	particle minecraft:crit ^.5 ^.5 ^.5
+
