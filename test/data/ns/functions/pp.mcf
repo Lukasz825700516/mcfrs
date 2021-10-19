@@ -5,7 +5,7 @@ back if entity @s[nbt={SelectedItem:{id:"minecraft:feather"}}] run function
 	scoreboard players set a@tmp 50
 	execute anchored eyes run function
 		execute
-		back if block ~ ~ ~ #minecraft:signs 
+		back if block ~ ~ ~ #minecraft:signs
 		back align xyz
 		back positioned ~.5 ~.5 ~.5
 		back run function

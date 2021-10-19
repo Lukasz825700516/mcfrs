@@ -36,9 +36,10 @@ where I: Iterator<Item = Scope<'a>> {
                 let mut lines = scope.content.lines().peekable();
                 let mut new_lines: Vec<String> = Vec::new();
                 while let Some(line) = lines.next() {
+                    let line = line.trim_end();
                     let continuation = lines.by_ref()
                         .peeking_take_while(|line| line.trim().split(" ").next() == Some("back"))
-                        .map(|line| line.split_once("back").unwrap().1);
+                        .map(|line| line.split_once("back").unwrap().1.trim_end());
 
                     let new_line = vec![line].into_iter()
                         .chain(continuation)
