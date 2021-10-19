@@ -1,4 +1,4 @@
-use std::{collections::HashMap, iter::{Peekable, Rev, repeat}, ops::Range};
+use std::{collections::{HashMap, HashSet}, iter::{Peekable, Rev, repeat}, ops::Range};
 
 use itertools::Itertools;
 use sha2::digest::generic_array::sequence::Split;
@@ -111,6 +111,7 @@ where I: Iterator<Item = Scope<'a>> {
     buffered: Vec<Scope<'a>>,
 
     definitions: Vec<MacroDefinition<'a>>,
+    calls: HashMap<(String, String), String>,
     next_scope_id: Rev<Range<usize>>,
 }
 
@@ -135,6 +136,7 @@ where I: Iterator<Item = Scope<'a>> {
             source,
             buffered: Vec::new(),
             definitions: Vec::new(),
+            calls: HashMap::new(),
             next_scope_id: (0 as usize..usize::MAX).rev()
         }
     }
@@ -186,33 +188,55 @@ where I: Iterator<Item = Scope<'a>> {
                         Some((prefix, payload)) => {
                             let mut payload = payload.trim().split(" ");
                             let macro_name = payload.next().unwrap();
-                            let macro_parameters = payload;
+                            let macro_parameters = payload.collect::<Vec<_>>();
 
-                            let definition = self
-                                .definitions
-                                .iter()
-                                .find(|definition| definition.name == macro_name)
-                                .expect(&format!("Missing macro definition for \"{}\"!", macro_name));
+                            let name_param = (
+                                macro_name.to_string(),
+                                macro_parameters.iter().join(" ")
+                            );
 
-                            if definition.has_separate_scope {
-                                let next_id = self.next_scope_id.next().unwrap();
-                                let scope = Scope::new_unnamed_scope(
-                                    next_id,
-                                    scope.namespace,
-                                    definition.call_into_string(macro_parameters));
+                            match self
+                                .calls
+                                .iter() 
+                                .find(|(key, _)| **key == name_param) {
+                                
+                                Some((_, name)) => {
+                                    newer_body.push(format!("{}function {}\n", prefix, name));
+                                },
+                                None => {
+                                    let definition = self
+                                        .definitions
+                                        .iter()
+                                        .find(|definition| definition.name == macro_name)
+                                        .expect(&format!("Missing macro definition for \"{}\"!", macro_name));
 
-                                newer_body.push(format!("{}function {}\n", prefix, scope.get_reference_name()));
-                                self.buffered.push(scope);
+                                    if definition.has_separate_scope {
 
-                            } else {
-                                scope_was_polluted = true;
-                                let indent = if prefix.trim().len() == 0 {
-                                    prefix.len()
-                                } else {
-                                    get_indent(prefix)
-                                };
-                                definition.call_into_code(macro_parameters, &mut newer_body, indent);
+                                        let next_id = self.next_scope_id.next().unwrap();
+                                        let scope = Scope::new_unnamed_scope(
+                                            next_id,
+                                            scope.namespace,
+                                            definition.call_into_string(macro_parameters.into_iter()));
+
+                                        self
+                                            .calls
+                                            .insert(name_param, scope.get_reference_name());
+
+                                        newer_body.push(format!("{}function {}\n", prefix, scope.get_reference_name()));
+                                        self.buffered.push(scope);
+
+                                    } else {
+                                        scope_was_polluted = true;
+                                        let indent = if prefix.trim().len() == 0 {
+                                            prefix.len()
+                                        } else {
+                                            get_indent(prefix)
+                                        };
+                                        definition.call_into_code(macro_parameters.into_iter(), &mut newer_body, indent);
+                                    }
+                                }
                             }
+
                         },
                         None => newer_body.push(format!("{}\n", line)),
                     } 

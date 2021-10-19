@@ -5,6 +5,7 @@ use super::datapack::Datapack;
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash)]
 pub struct Namespace<'a> {
     pub datapack: &'a Datapack,
     pub name: String,

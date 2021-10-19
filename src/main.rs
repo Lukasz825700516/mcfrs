@@ -14,8 +14,8 @@ fn main() -> Result<(), Box<dyn Error>>{
         .comment_remove()
         .back()
         .macros()
-        // .scopes()
-        // .substitutions()
+        .scopes()
+        .substitutions()
 
         .for_each(|scope| {
             println!("{}:\n{}\n", scope.get_reference_name(), &scope.content);

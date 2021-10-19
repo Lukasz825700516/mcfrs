@@ -3,6 +3,7 @@ use std::path::PathBuf;
 #[derive(Debug)]
 #[derive(Clone, Copy)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash)]
 pub enum McVersion {
     V1_17_4,
 }
@@ -10,6 +11,7 @@ pub enum McVersion {
 #[derive(Debug)]
 #[derive(Clone)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash)]
 pub struct Datapack {
     pub name: String,
 

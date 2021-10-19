@@ -1,5 +1,9 @@
 use crate::vanilla::namespace::Namespace;
 
+#[derive(Debug)]
+#[derive(Clone)]
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Hash)]
 pub struct Scope<'a> {
     pub name: String,
 
