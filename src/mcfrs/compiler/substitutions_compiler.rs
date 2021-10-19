@@ -18,6 +18,7 @@ where I: Iterator<Item = Scope<'a>> {
         match self.source.next() {
             Some(mut scope) => {
                 scope.content = scope.content.replace("$this", &scope.get_reference_name());
+                scope.content = scope.content.replace("$namespace", &scope.namespace.name);
 
                 for capture in self.hash_regex.captures_iter(&scope.content.clone()) {
                     let full_match = &capture[0];

@@ -1,21 +1,3 @@
-generate function add_color_to_text $color $text
-	data modify storage tmp:a . set from block ~ ~ ~ Text$text
-	data modify block ~ ~ ~ Text$text set value '[{"text":"","color":"$color"},{"nbt":"storage","storage":"tmp:a"}]'
-
-generate function outline_sign $type $block_state $rotation
-	execute
-	back if block ~ ~ ~ $type[$block_state]
-	back rotated $rotation 0
-	back run call particle_sign_frame
-
-generate function copy_sign_color $color
-	execute
-	back if block #minecraft:signs{Color:"$color"}
-	back run function
-		call add_color_to_text $color 1
-		call add_color_to_text $color 2
-		call add_color_to_text $color 3
-		call add_color_to_text $color 4
 execute
 back as @a
 back at @s 
@@ -76,6 +58,7 @@ back if entity @s[nbt={SelectedItem:{id:"minecraft:feather"}}] run function
 		back run function $this
 
 generate function particle_sign_frame
+with scope
 	particle minecraft:crit ^-.5 ^-.5 ^.5
 	particle minecraft:crit ^-.5 ^.5 ^.5
 
@@ -85,3 +68,21 @@ generate function particle_sign_frame
 	particle minecraft:crit ^.5 ^-.5 ^.5
 	particle minecraft:crit ^.5 ^.5 ^.5
 
+generate function add_color_to_text $color $text
+	data modify storage tmp:a . set from block ~ ~ ~ Text$text
+	data modify block ~ ~ ~ Text$text set value '[{"text":"","color":"$color"},{"nbt":"storage","storage":"tmp:a"}]'
+
+generate function outline_sign $type $block_state $rotation
+	execute
+	back if block ~ ~ ~ $type[$block_state]
+	back rotated $rotation 0
+	back run call particle_sign_frame
+
+generate function copy_sign_color $color
+	execute
+	back if block #minecraft:signs{Color:"$color"}
+	back run function
+		call add_color_to_text $color 1
+		call add_color_to_text $color 2
+		call add_color_to_text $color 3
+		call add_color_to_text $color 4

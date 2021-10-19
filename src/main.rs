@@ -12,10 +12,10 @@ fn main() -> Result<(), Box<dyn Error>>{
 
     FileCompiler::new(&namespace)
         .comment_remove()
-        .macros()
-        .scopes()
-        .substitutions()
         .back()
+        .macros()
+        // .scopes()
+        // .substitutions()
 
         .for_each(|scope| {
             println!("{}:\n{}\n", scope.get_reference_name(), &scope.content);

@@ -1,58 +1,108 @@
-use std::{collections::HashMap, iter::{Peekable, Rev}, ops::Range};
+use std::{collections::HashMap, iter::{Peekable, Rev, repeat}, ops::Range};
 
 use itertools::Itertools;
+use sha2::digest::generic_array::sequence::Split;
 
 use crate::{mcfrs::{scope::Scope, util::get_indent}, vanilla::namespace::Namespace};
 
 pub struct MacroDefinition<'a> {
-    parameters: Vec<String>,
     namespace: &'a Namespace<'a>,
+
     name: String,
-    content: String,
+    parameters: Vec<String>,
+    body: String,
+
+    has_separate_scope: bool,
 }
 
-impl<'b> MacroDefinition<'b> {
-    fn new<'a>(namespace: &'b Namespace<'b>, line: &'a str, mut words: Peekable<std::str::Split<'a, &'a str>>, lines: &mut std::iter::Peekable<std::str::Lines>) -> Self {
-        let current_indent = get_indent(line);
-        let macro_name = words.next().unwrap().to_string();
-        let parameters: Vec<String> = words.map(|param| param.to_string()).collect();
-        let content: String = lines
-            .by_ref()
-            .peeking_take_while(|l| get_indent(l) > current_indent)
-            .map(|line| &line[current_indent..])
-            .collect::<Vec<_>>()
+impl<'a> MacroDefinition<'a> {
+    pub fn new<'b, I>(namespace: &'a Namespace<'a>, definition: &str, content: &mut Peekable<I>) -> Self 
+    where I: Iterator<Item = &'b str> {
+        let mut words = definition
+            .trim()
+            .split(" ")
+            .skip(2);
+
+        let macro_name = words
+            .next()
+            .unwrap()
+            .to_string();
+
+        let macro_parameters = words
+            .map(|p| p.to_string())
+            .collect::<Vec<_>>();
+
+
+        let indent = definition
+            .find(|c| c != '\t')
+            .unwrap();
+
+        let mut has_separate_scope = false;
+
+        content
+            .peeking_take_while(|line| match line.split_once("with") {
+                Some((prefix, _)) => prefix.trim().len() == 0,
+                None => false
+            })
+            .map(|line| line.split_once("with").unwrap().1.trim())
+            .for_each(|setting| {
+                if setting == "scope" { has_separate_scope = true; }
+            });
+
+        let macro_body = content
+            .peeking_take_while(|line| line.chars().skip(indent).next() == Some('\t'))
+            .map(|line| &line[indent + 1..])
             .join("\n");
 
         Self {
-            name: macro_name,
-            parameters,
-            content,
             namespace,
+            name: macro_name,
+            parameters: macro_parameters,
+            body: macro_body,
+            has_separate_scope
         }
     }
-}
 
-pub struct MacroCall {
-    scope_id: usize,
-    parameters: Vec<String>,
-}
+    pub fn call_into_string<'b, I>(&'b self, parameters: I) -> String
+    where I: Iterator<Item = &'b str> {
+        let mut body: Vec<String> = Vec::new();
 
-impl MacroCall {
-    pub fn new(scope_id: usize, parameters: Vec<String>) -> Self { Self { scope_id, parameters } }
-    pub fn get_content(&self, definition: &MacroDefinition) -> String {
-        let mut replaced_content = definition.content.clone();
+        self.call_into_code(parameters, &mut body, 0);
 
-        // Zip into key value pairs names and values of
-        // parameters, then replace all keys to values in macro
-        // content
-        definition.parameters.iter()
-            .zip(self.parameters.iter())
-            .for_each(|(key, value)| {
-                replaced_content = replaced_content.replace(key, value);
-            });
-
-        replaced_content
+        body
+            .into_iter()
+            .collect::<String>()
     }
+
+    pub fn call_into_code<'b, I>(&'b self, parameters: I, out: &mut Vec<String>, indent: usize)
+    where I: Iterator<Item = &'b str> {
+        let parameters = self
+            .parameters
+            .iter()
+            .zip(parameters);
+
+        let mut body = self
+            .body
+            .clone();
+
+        for (name, value) in parameters {
+            body = body
+                .replace(name, value);
+        }
+
+        let indent = repeat("\t")
+            .take(indent)
+            .collect::<String>();
+
+        let indent = indent.as_str();
+
+        body
+            .lines()
+            .map(|line| format!("{}{}\n", indent, line))
+            .for_each(|line| out.push(line));
+
+    }
+
 }
 
 pub struct MacroCompiler<'a, I>
@@ -61,7 +111,6 @@ where I: Iterator<Item = Scope<'a>> {
     buffered: Vec<Scope<'a>>,
 
     definitions: Vec<MacroDefinition<'a>>,
-    calls: HashMap<String, Vec<MacroCall>>,
     next_scope_id: Rev<Range<usize>>,
 }
 
@@ -85,35 +134,9 @@ where I: Iterator<Item = Scope<'a>> {
         Self {
             source,
             buffered: Vec::new(),
-            calls: HashMap::new(),
             definitions: Vec::new(),
             next_scope_id: (0 as usize..usize::MAX).rev()
         }
-    }
-    fn save_macro(&mut self, name: String, call: MacroCall) {
-        if !self.calls.contains_key(&name) {
-            self.calls.insert(name.clone(), vec![call]);
-        } else {
-            self.calls.get_mut(&name)
-                .unwrap()
-                .push(call);
-        }
-    }
-    fn generate_scopes(&mut self, definition: &MacroDefinition<'a>) {
-        self.calls.iter()
-            .filter_map(|(name, calls)| {
-                if *name == definition.name { Some(calls.into_iter()) }
-                else { None }
-            })
-            .flatten()
-            .map(|call| (call.scope_id, call.get_content(&definition), definition.namespace))
-            .collect::<Vec<_>>()
-            .into_iter()
-            .for_each(|(id, content, namespace)| {
-                let mut scope = Scope::new_unnamed(id, namespace);
-                scope.content = content;
-                self.buffered.push(scope);
-            });
     }
 }
 
@@ -123,120 +146,93 @@ where I: Iterator<Item = Scope<'a>> {
     type Item = Scope<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let scope;
-
-        match self.source.next() {
-            Some(pulled_scope) => scope = Some(pulled_scope),
-            None => scope = self.buffered.pop()
-        }
+        let scope = match self.source.next() {
+            Some(scope) => Some(scope),
+            None => self.buffered.pop(),
+        };
 
         match scope {
             Some(mut scope) => {
-                let mut scope_needs_reprocessing = false;
-                let mut lines = scope.content
+                let content = scope
+                    .content;
+
+                let mut content = content
                     .lines()
                     .peekable();
 
-                let mut new_lines: Vec<String> = Vec::new();
+                let mut new_body = Vec::new();
 
-                loop {
-                    match lines.next() {
-                        Some(line) => {
-                            // let line = line.trim();
-                            let mut words = line.split(" ").peekable();
+                // Separate all macro definitions from normal scope's code
+                while content.peek().is_some() {
+                    let mut body = content
+                        .peeking_take_while(|line| line.trim().split(" ").next() != Some("generate"))
+                        .collect::<Vec<_>>();
 
-                            match words.peek() { 
-                                None => {},
-                                Some(&"generate") => { words.next(); if words.next() == Some("function") {
-                                    let definition = MacroDefinition::new(scope.namespace, line, words, &mut lines);
-                                    self.generate_scopes(&definition);
-                                    self.definitions.push(definition);
-                                }},
-                                Some(_) => {
+                    new_body.append(&mut body);
 
-                                    if let Some((prefix, payload)) = line.split_once("call") {
-                                        scope_needs_reprocessing = true;
-
-                                        let mut words = payload.trim().split(" ");
-                                        let macro_name = words.next().unwrap().to_string();
-                                        let parameters = words.map(|p| p.to_string())
-                                            .collect::<Vec<_>>();
-
-
-                                        let previous_same_call = self.calls.iter()
-                                            .filter_map(|(name, calls)| if name.as_str() == macro_name { Some(calls) } else { None })
-                                            .flatten()
-                                            .find(|call| call.parameters == parameters);
-
-                                        let new_line = match self.definitions.iter()
-                                            .find(|def| def.name == macro_name && prefix.trim().len() == 0) {
-                                            Some(macro_definition) => {
-                                                let call = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
-                                                let new_line = call.get_content(macro_definition)
-                                                    .lines()
-                                                    .map(|line| format!("{}{}", prefix, line))
-                                                    .join("\n");
-
-                                                if previous_same_call.is_none() {
-                                                    self.save_macro(macro_name, call);
-                                                }
-
-                                                new_line
-                                            },
-                                            None => match previous_same_call {
-                                                Some(call) => {
-                                                    let function_call = get_call_call(call.scope_id, scope.namespace);
-                                                    format!("{}{}", prefix, function_call)
-                                                },
-                                                None => {
-                                                    let new_scope = MacroCall::new(self.next_scope_id.next().unwrap(), parameters);
-                                                    let function_call = get_call_call(new_scope.scope_id, scope.namespace);
-
-                                                    self.save_macro(macro_name, new_scope);
-
-                                                    format!("{}{}", prefix, function_call)
-                                                }
-                                            }
-                                        };
-
-                                        new_lines.push(new_line);
-                                    } else {
-                                        new_lines.push(line.to_string());
-                                    }
-
-                                }
-                            }
-
-
-                        },
-                        None => break
+                    if let Some(definition) = content.next() {
+                        self
+                            .definitions
+                            .push(MacroDefinition::new(scope.namespace, definition, &mut content));
                     }
                 }
 
-                let new_content = new_lines.join("\n");
+                let mut newer_body: Vec<String> = Vec::new();
+                let mut scope_was_polluted = false;
 
-                scope.content = new_content;
+                // Convert macro calls into valid commands
+                for line in new_body {
+                    match line.split_once("call") {
+                        Some((prefix, payload)) => {
+                            let mut payload = payload.trim().split(" ");
+                            let macro_name = payload.next().unwrap();
+                            let macro_parameters = payload;
 
-                match scope_needs_reprocessing {
-                    true => { self.buffered.push(scope); self.next() }
-                    false => Some(scope)
+                            let definition = self
+                                .definitions
+                                .iter()
+                                .find(|definition| definition.name == macro_name)
+                                .expect(&format!("Missing macro definition for \"{}\"!", macro_name));
+
+                            if definition.has_separate_scope {
+                                let next_id = self.next_scope_id.next().unwrap();
+                                let scope = Scope::new_unnamed_scope(
+                                    next_id,
+                                    scope.namespace,
+                                    definition.call_into_string(macro_parameters));
+
+                                newer_body.push(format!("{}function {}\n", prefix, scope.get_reference_name()));
+                                self.buffered.push(scope);
+
+                            } else {
+                                scope_was_polluted = true;
+                                let indent = if prefix.trim().len() == 0 {
+                                    prefix.len()
+                                } else {
+                                    get_indent(prefix)
+                                };
+                                definition.call_into_code(macro_parameters, &mut newer_body, indent);
+                            }
+                        },
+                        None => newer_body.push(format!("{}\n", line)),
+                    } 
+                }
+
+                scope.content = newer_body
+                    .into_iter()
+                    .collect();
+
+                if scope_was_polluted {
+                    self.buffered.push(scope);
+                    self.next()
+                } else {
+                    Some(scope)
                 }
             },
-            None => {
-                while let Some(definition) = self.definitions.pop() {
-                    self.generate_scopes(&definition);
-                }
-
-                if self.buffered.len() > 0 { self.next() }
-                else { None }
-            }
+            None => None
         }
     }
 
 
-}
-
-fn get_call_call(scope_id: usize, namespace: &Namespace) -> String {
-    format!("function {}", Scope::new_unnamed(scope_id, namespace).get_reference_name())
 }
 
